@@ -1,0 +1,1 @@
+python3 pg_to_mermaid.py schema.sql > erd.mmd

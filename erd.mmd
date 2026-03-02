@@ -1,0 +1,156 @@
+erDiagram
+
+    auth_images {
+        uuid id PK
+        character code
+        text image_url
+        boolean is_active
+    }
+
+    classroom_modules {
+        uuid id PK
+        uuid classroom_id
+        uuid module_id
+        integer order
+    }
+
+    classroom_students {
+        uuid id PK
+        uuid classroom_id
+        uuid user_id
+        timestamp joined_at
+    }
+
+    classrooms {
+        uuid id PK
+        character name
+        text description
+        character alias
+        character grade_type
+        integer grade_level
+        uuid created_by
+        uuid tenant_id
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    module_lessons {
+        uuid id PK
+        uuid module_id
+        character name
+        integer step
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    modules {
+        uuid id PK
+        character name
+        text description
+        character difficulty
+        character behavior_type
+        character grade_type
+        integer grade_level
+        boolean is_official
+        uuid created_by
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    mst_junior_modules {
+        uuid id PK
+        character title
+        text description
+        public difficulty
+        public target_grade
+        public behavior_type
+        boolean is_official
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    schema_migrations {
+        bigint version PK
+        boolean dirty
+    }
+
+    student_lesson_progress {
+        uuid id PK
+        uuid classroom_id
+        uuid module_id
+        uuid lesson_id
+        uuid user_id
+        character status
+        integer progress_percent
+        timestamp started_at
+        timestamp completed_at
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    student_module_progress {
+        uuid id PK
+        uuid classroom_id
+        uuid module_id
+        uuid user_id
+        integer total_lessons
+        integer completed_lessons
+        integer progress_percent
+        boolean is_completed
+        timestamp started_at
+        timestamp completed_at
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    user_passwords {
+        uuid id
+        uuid user_id
+        character password_hash
+        character password_salt
+        integer failed_attempts
+        timestamp locked_until
+        timestamp last_failed_at
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    user_pins {
+        uuid id PK
+        uuid user_id
+        character pin_hash
+        character pin_salt
+        integer pin_length
+        integer failed_attempts
+        timestamp locked_until
+        timestamp last_failed_at
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    users {
+        uuid id PK
+        uuid tenant_id
+        character username
+        character display_name
+        text avatar_url
+        boolean is_active
+        timestamp created_at
+        timestamp updated_at
+        timestamp deleted_at
+    }
+
+    classrooms ||--o{ auth_images : "classroom_id"
+    modules ||--o{ classroom_modules : "module_id"
+    classrooms ||--o{ classroom_students : "classroom_id"
+    users ||--o{ classroom_students : "user_id"
+    modules ||--o{ module_lessons : "module_id"
+    classrooms ||--o{ student_lesson_progress : "classroom_id"
+    module_lessons ||--o{ student_lesson_progress : "lesson_id"
+    modules ||--o{ student_lesson_progress : "module_id"
+    users ||--o{ student_lesson_progress : "user_id"
+    classrooms ||--o{ student_module_progress : "classroom_id"
+    modules ||--o{ student_module_progress : "module_id"
+    users ||--o{ student_module_progress : "user_id"
+    users ||--o{ user_passwords : "user_id"
+    users ||--o{ user_pins : "user_id"
