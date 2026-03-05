@@ -1,0 +1,16 @@
+services:
+  backup:
+    image: zulkarnen/docker-postgres-backup
+    container_name: backup-agent
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./backups:/backup
+    environment:
+      BACKUP_DIR: /backup
+      LABEL_FILTER: backup.enable=true
+      INTERVAL: 300 # default: 300s or 5 (minutes)
+      BACKUP_FORMAT: plain # default: compress
