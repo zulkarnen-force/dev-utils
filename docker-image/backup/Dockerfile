@@ -5,7 +5,8 @@ RUN apk add --no-cache \
     docker-cli \
     postgresql-client \
     jq \
-    tzdata
+    tzdata \
+    rclone
 
 WORKDIR /app
 

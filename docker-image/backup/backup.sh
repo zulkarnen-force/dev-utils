@@ -10,6 +10,44 @@ INTERVAL=${INTERVAL:-300}
 MAX_FILES=${MAX_FILES:-7}
 BACKUP_FORMAT=${BACKUP_FORMAT:-compress}
 
+# ── Rclone settings ──────────────────────────────────────────────────
+RCLONE_ENABLED=${RCLONE_ENABLED:-false}
+
+# Provider 1
+RCLONE_1_PROVIDER=${RCLONE_1_PROVIDER:-}       # r2 | mega | pcloud
+RCLONE_1_NAME=${RCLONE_1_NAME:-remote1}
+RCLONE_1_REMOTE_PATH=${RCLONE_1_REMOTE_PATH:-backup}
+# R2 (Cloudflare S3)
+RCLONE_1_ACCESS_KEY_ID=${RCLONE_1_ACCESS_KEY_ID:-}
+RCLONE_1_SECRET_ACCESS_KEY=${RCLONE_1_SECRET_ACCESS_KEY:-}
+RCLONE_1_ENDPOINT=${RCLONE_1_ENDPOINT:-}
+RCLONE_1_ACL=${RCLONE_1_ACL:-private}
+# Mega
+RCLONE_1_USER=${RCLONE_1_USER:-}
+RCLONE_1_PASS=${RCLONE_1_PASS:-}
+# PCloud
+RCLONE_1_HOSTNAME=${RCLONE_1_HOSTNAME:-api.pcloud.com}
+RCLONE_1_TOKEN=${RCLONE_1_TOKEN:-}
+
+# Provider 2
+RCLONE_2_PROVIDER=${RCLONE_2_PROVIDER:-}       # r2 | mega | pcloud
+RCLONE_2_NAME=${RCLONE_2_NAME:-remote2}
+RCLONE_2_REMOTE_PATH=${RCLONE_2_REMOTE_PATH:-backup}
+# R2 (Cloudflare S3)
+RCLONE_2_ACCESS_KEY_ID=${RCLONE_2_ACCESS_KEY_ID:-}
+RCLONE_2_SECRET_ACCESS_KEY=${RCLONE_2_SECRET_ACCESS_KEY:-}
+RCLONE_2_ENDPOINT=${RCLONE_2_ENDPOINT:-}
+RCLONE_2_ACL=${RCLONE_2_ACL:-private}
+# Mega
+RCLONE_2_USER=${RCLONE_2_USER:-}
+RCLONE_2_PASS=${RCLONE_2_PASS:-}
+# PCloud
+RCLONE_2_HOSTNAME=${RCLONE_2_HOSTNAME:-api.pcloud.com}
+RCLONE_2_TOKEN=${RCLONE_2_TOKEN:-}
+
+RCLONE_CONF="/tmp/rclone.conf"
+# ─────────────────────────────────────────────────────────────────────
+
 mkdir -p "$BACKUP_DIR"
 
 log() {
@@ -17,6 +55,136 @@ log() {
   shift
   echo "$(date '+%Y-%m-%d %H:%M:%S') [$level] $*"
 }
+
+# ── Rclone config generator ─────────────────────────────────────────
+generate_rclone_remote() {
+  local slot="$1"  # 1 or 2
+
+  local provider_var="RCLONE_${slot}_PROVIDER"
+  local name_var="RCLONE_${slot}_NAME"
+  local provider="${!provider_var}"
+  local name="${!name_var}"
+
+  [[ -z "$provider" ]] && return
+
+  log INFO "Configuring rclone remote [$name] with provider: $provider"
+
+  case "$provider" in
+    r2)
+      local ak_var="RCLONE_${slot}_ACCESS_KEY_ID"
+      local sk_var="RCLONE_${slot}_SECRET_ACCESS_KEY"
+      local ep_var="RCLONE_${slot}_ENDPOINT"
+      local acl_var="RCLONE_${slot}_ACL"
+      cat >> "$RCLONE_CONF" <<EOF
+
+[$name]
+type = s3
+provider = Cloudflare
+access_key_id = ${!ak_var}
+secret_access_key = ${!sk_var}
+endpoint = ${!ep_var}
+acl = ${!acl_var}
+EOF
+      ;;
+    mega)
+      local user_var="RCLONE_${slot}_USER"
+      local pass_var="RCLONE_${slot}_PASS"
+      local obscured_pass
+      obscured_pass=$(rclone obscure "${!pass_var}")
+      cat >> "$RCLONE_CONF" <<EOF
+
+[$name]
+type = mega
+user = ${!user_var}
+pass = $obscured_pass
+EOF
+      ;;
+    pcloud)
+      local host_var="RCLONE_${slot}_HOSTNAME"
+      local token_var="RCLONE_${slot}_TOKEN"
+      local raw_token="${!token_var}"
+      # If the token is not already JSON, wrap it
+      if [[ "$raw_token" != \{* ]]; then
+        raw_token="{\"access_token\":\"${raw_token}\",\"token_type\":\"bearer\",\"expiry\":\"0001-01-01T00:00:00Z\"}"
+      fi
+      cat >> "$RCLONE_CONF" <<EOF
+
+[$name]
+type = pcloud
+hostname = ${!host_var}
+token = $raw_token
+EOF
+      ;;
+    *)
+      log ERROR "Unknown rclone provider: $provider (slot $slot)"
+      ;;
+  esac
+}
+
+setup_rclone() {
+  if [[ "$RCLONE_ENABLED" != "true" ]]; then
+    return
+  fi
+
+  : > "$RCLONE_CONF"   # truncate / create
+
+  generate_rclone_remote 1
+  generate_rclone_remote 2
+
+  log INFO "Rclone config written to $RCLONE_CONF"
+}
+
+rclone_upload() {
+  local source_file="$1"
+  local container_name="$2"
+
+  if [[ "$RCLONE_ENABLED" != "true" ]]; then
+    return
+  fi
+
+  for slot in 1 2; do
+    local provider_var="RCLONE_${slot}_PROVIDER"
+    local name_var="RCLONE_${slot}_NAME"
+    local path_var="RCLONE_${slot}_REMOTE_PATH"
+    local provider="${!provider_var}"
+    local name="${!name_var}"
+    local remote_path="${!path_var}"
+
+    [[ -z "$provider" ]] && continue
+
+    local dest="${name}:${remote_path}/${container_name}/"
+
+    log INFO "Uploading to rclone remote [$name] -> $dest"
+
+    if rclone copy "$source_file" "$dest" --config "$RCLONE_CONF" 2>&1; then
+      log INFO "Upload to [$name] completed"
+      rclone_cleanup "$dest" "$name"
+    else
+      log ERROR "Upload to [$name] failed"
+    fi
+  done
+}
+
+rclone_cleanup() {
+  local remote_dir="$1"
+  local name="$2"
+
+  local files
+  files=$(rclone lsf "$remote_dir" --config "$RCLONE_CONF" 2>/dev/null | sort)
+  local total
+  total=$(echo "$files" | grep -c . || true)
+
+  if (( total > MAX_FILES )); then
+    local remove_count=$((total - MAX_FILES))
+    log INFO "Rclone retention [$name]: removing $remove_count old backup(s)"
+
+    echo "$files" | head -n "$remove_count" | while read -r f; do
+      log INFO "Rclone removing: ${remote_dir}${f}"
+      rclone deletefile "${remote_dir}${f}" --config "$RCLONE_CONF" 2>&1 || true
+    done
+  fi
+}
+# ─────────────────────────────────────────────────────────────────────
 
 print_docs() {
   log INFO "------------------------------------------------------------"
@@ -40,6 +208,14 @@ print_docs() {
   log INFO ""
   log INFO "Retention:"
   log INFO "  MAX_FILES=$MAX_FILES"
+  log INFO ""
+  if [[ "$RCLONE_ENABLED" == "true" ]]; then
+    log INFO "Rclone upload: ENABLED"
+    [[ -n "$RCLONE_1_PROVIDER" ]] && log INFO "  Provider 1: $RCLONE_1_PROVIDER ($RCLONE_1_NAME -> $RCLONE_1_REMOTE_PATH)"
+    [[ -n "$RCLONE_2_PROVIDER" ]] && log INFO "  Provider 2: $RCLONE_2_PROVIDER ($RCLONE_2_NAME -> $RCLONE_2_REMOTE_PATH)"
+  else
+    log INFO "Rclone upload: DISABLED"
+  fi
   log INFO "------------------------------------------------------------"
 }
 
@@ -108,6 +284,8 @@ run_backup() {
 
     log INFO "Backup completed"
 
+    rclone_upload "$outfile" "$container"
+
     cleanup_old_backups "$container_dir"
 
   done
@@ -119,6 +297,7 @@ next_run_time() {
 }
 
 print_docs
+setup_rclone
 log INFO "Backup agent started"
 log INFO "Backup interval: $INTERVAL seconds"
 
